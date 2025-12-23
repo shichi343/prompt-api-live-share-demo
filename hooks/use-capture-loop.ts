@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { captureFrame, stopCapture } from "@/lib/capture";
+import { summarizeCaptures } from "@/lib/llm";
 import { saveSummaries } from "@/lib/storage";
 import type { SummaryEntry } from "@/types";
 
@@ -21,6 +22,7 @@ export function useCaptureLoop({
 }: Params) {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const llmUnavailableRef = useRef(false);
 
   useEffect(() => {
     if (!enabled) {
@@ -43,11 +45,24 @@ export function useCaptureLoop({
           onStopCapture();
           return;
         }
-        const frameDataUrl = await captureFrame(streamRef);
+        const frameBlob = await captureFrame(streamRef);
+        const recent: SummaryEntry[] = [];
+        const summaryText = await summarizeCaptures({ frameBlob, recent });
+        if (!summaryText) {
+          if (!llmUnavailableRef.current) {
+            llmUnavailableRef.current = true;
+            toast.error("サマリ生成に失敗しました", {
+              description:
+                "Prompt APIが無効、またはマルチモーダル入力に非対応の可能性があります。",
+            });
+          }
+          return;
+        }
+        llmUnavailableRef.current = false;
         const entry: SummaryEntry = {
           id: crypto.randomUUID(),
           timestamp: Date.now(),
-          summary: `Captured frame (${frameDataUrl.length} bytes)`, // ダミー。ここで要約生成ロジックを差し込む余地あり。
+          summary: summaryText,
         };
         setSummaries((prev) => {
           const next = [entry, ...prev];

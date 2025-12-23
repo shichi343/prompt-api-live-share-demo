@@ -5,12 +5,14 @@ import CaptureControls from "@/components/capture-controls";
 import HistoryTab from "@/components/history-tab";
 import LivePreview from "@/components/live-preview";
 import ReportTab from "@/components/report-tab";
+import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useCaptureLoop } from "@/hooks/use-capture-loop";
 import { loadInterval, loadReports, loadSummaries } from "@/lib/storage";
 import type { ReportEntry, SummaryEntry } from "@/types";
 
 function PageContent() {
+  const [isLoading, setIsLoading] = useState(true);
   const [isSharing, setIsSharing] = useState(false);
   const [intervalSec, setIntervalSec] = useState<number>(10);
   const [summaries, setSummaries] = useState<SummaryEntry[]>([]);
@@ -26,6 +28,7 @@ function PageContent() {
     }
     setSummaries(loadSummaries());
     setReports(loadReports());
+    setIsLoading(false);
   }, []);
 
   const controlsProps = useMemo(
@@ -48,6 +51,17 @@ function PageContent() {
     setSummaries,
     onStopCapture: () => setIsSharing(false),
   });
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center gap-3 bg-zinc-50 text-zinc-900">
+        <Spinner className="size-8" />
+        <span className="text-sm text-zinc-600">
+          ローカルデータを読み込み中...
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
