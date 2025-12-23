@@ -9,5 +9,5 @@
 ## デプロイ
 - GitHub Actions: `.github/workflows/deploy.yml` で Pages デプロイ
 - ビルド/エクスポート: `npm run build`（`output: "export"` で `out/` が生成）
-- basePath: Pages の公開URLが `https://username.github.io/<repo>/` の場合は `NEXT_PUBLIC_BASE_PATH=<repo>` を環境変数で指定（ルート直下なら不要）
+- basePath: Pages 公開URLが `https://username.github.io/<repo>/` の場合は `NEXT_PUBLIC_BASE_PATH=<repo>` を環境変数で指定（ルート直下なら不要）。現在のワークフローでは `NEXT_PUBLIC_BASE_PATH=prompt-api-demo` を設定済み。
 
