@@ -1,65 +1,105 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useMemo, useRef, useState } from "react";
+import CaptureControls from "@/components/capture-controls";
+import HistoryTab from "@/components/history-tab";
+import LivePreview from "@/components/live-preview";
+import ReportTab from "@/components/report-tab";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCaptureLoop } from "@/hooks/use-capture-loop";
+import { loadInterval, loadReports, loadSummaries } from "@/lib/storage";
+import type { ReportEntry, SummaryEntry } from "@/types";
+
+function PageContent() {
+  const [isSharing, setIsSharing] = useState(false);
+  const [intervalSec, setIntervalSec] = useState<number>(10);
+  const [summaries, setSummaries] = useState<SummaryEntry[]>([]);
+  const [reports, setReports] = useState<ReportEntry[]>([]);
+  const [activeTab, setActiveTab] = useState<"history" | "report">("history");
+  const streamRef = useRef<MediaStream | null>(null);
+
+  // 初期ロード
+  useEffect(() => {
+    const initialInterval = loadInterval();
+    if (initialInterval) {
+      setIntervalSec(initialInterval);
+    }
+    setSummaries(loadSummaries());
+    setReports(loadReports());
+  }, []);
+
+  const controlsProps = useMemo(
+    () => ({
+      isSharing,
+      intervalSec,
+      setIntervalSec,
+      setIsSharing,
+      streamRef,
+      setSummaries,
+    }),
+    [isSharing, intervalSec]
+  );
+
+  // キャプチャループ
+  useCaptureLoop({
+    enabled: isSharing,
+    intervalSec,
+    streamRef,
+    setSummaries,
+    onStopCapture: () => setIsSharing(false),
+  });
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between bg-white px-16 py-32 sm:items-start dark:bg-black">
-        <Image
-          alt="Next.js logo"
-          className="dark:invert"
-          height={20}
-          priority
-          src="/next.svg"
-          width={100}
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs font-semibold text-3xl text-black leading-10 tracking-tight dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg text-zinc-600 leading-8 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+    <div className="min-h-screen bg-zinc-50 text-zinc-900">
+      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
+        <header className="flex items-center justify-between">
+          <div>
+            <h1 className="font-semibold text-2xl">
+              画面共有 × Prompt API 日次レポート
+            </h1>
+            <p className="text-sm text-zinc-500">
+              共有を開始して履歴を蓄積し、必要なタイミングでレポートを生成します。
+            </p>
+          </div>
+        </header>
+
+        <div className="grid gap-6 lg:grid-cols-[1.1fr,1fr]">
+          {/* Left column */}
+          <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+            <CaptureControls {...controlsProps} />
+            <div className="mt-4">
+              <LivePreview streamRef={streamRef} />
+            </div>
+          </div>
+
+          {/* Right column */}
+          <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+            <Tabs
+              onValueChange={(v) => setActiveTab(v as "history" | "report")}
+              value={activeTab}
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 font-medium text-base sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] md:w-[158px] dark:hover:bg-[#ccc]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            rel="noopener noreferrer"
-            target="_blank"
-          >
-            <Image
-              alt="Vercel logomark"
-              className="dark:invert"
-              height={16}
-              src="/vercel.svg"
-              width={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-black/[.08] border-solid px-5 transition-colors hover:border-transparent hover:bg-black/[.04] md:w-[158px] dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            rel="noopener noreferrer"
-            target="_blank"
-          >
-            Documentation
-          </a>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="history">作業履歴</TabsTrigger>
+                <TabsTrigger value="report">レポート</TabsTrigger>
+              </TabsList>
+              <TabsContent className="mt-4" value="history">
+                <HistoryTab setSummaries={setSummaries} summaries={summaries} />
+              </TabsContent>
+              <TabsContent className="mt-4" value="report">
+                <ReportTab
+                  reports={reports}
+                  setReports={setReports}
+                  summaries={summaries}
+                />
+              </TabsContent>
+            </Tabs>
+          </div>
         </div>
       </main>
     </div>
   );
+}
+
+export default function Home() {
+  return <PageContent />;
 }
