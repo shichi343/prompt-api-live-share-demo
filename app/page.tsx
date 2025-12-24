@@ -1,24 +1,37 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import CaptureControls from "@/components/capture-controls";
-import HistoryTab from "@/components/history-tab";
-import LivePreview from "@/components/live-preview";
-import ReportTab from "@/components/report-tab";
-import { Spinner } from "@/components/ui/spinner";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import ControlPanel from "@/components/control-panel";
+import StatusHeader from "@/components/status-header";
+import Timeline from "@/components/timeline";
 import { useCaptureLoop } from "@/hooks/use-capture-loop";
-import { loadInterval, loadReports, loadSummaries } from "@/lib/storage";
+import { startCapture, stopCapture } from "@/lib/capture";
+import { generateReport } from "@/lib/llm";
+import {
+  loadInterval,
+  loadReportInterval,
+  loadReports,
+  loadSummaries,
+  loadTheme,
+  saveReports,
+  saveTheme,
+} from "@/lib/storage";
 import type { ReportEntry, SummaryEntry } from "@/types";
 
-function PageContent() {
+export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSharing, setIsSharing] = useState(false);
   const [intervalSec, setIntervalSec] = useState<number>(10);
+  const [reportIntervalMin, setReportIntervalMin] = useState<number>(30);
   const [summaries, setSummaries] = useState<SummaryEntry[]>([]);
   const [reports, setReports] = useState<ReportEntry[]>([]);
-  const [activeTab, setActiveTab] = useState<"history" | "report">("history");
+  const [nextCaptureAt, setNextCaptureAt] = useState<number | null>(null);
+  const [nextReportAt, setNextReportAt] = useState<number | null>(null);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
   const streamRef = useRef<MediaStream | null>(null);
+  const reportTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // 初期ロード
   useEffect(() => {
@@ -26,22 +39,157 @@ function PageContent() {
     if (initialInterval) {
       setIntervalSec(initialInterval);
     }
+    const initialReportInterval = loadReportInterval();
+    if (initialReportInterval) {
+      setReportIntervalMin(initialReportInterval);
+    }
+    const initialTheme = loadTheme();
+    if (initialTheme) {
+      setTheme(initialTheme);
+    }
     setSummaries(loadSummaries());
     setReports(loadReports());
     setIsLoading(false);
   }, []);
 
-  const controlsProps = useMemo(
-    () => ({
-      isSharing,
-      intervalSec,
-      setIntervalSec,
-      setIsSharing,
-      streamRef,
-      setSummaries,
-    }),
-    [isSharing, intervalSec]
-  );
+  // テーマ変更時にHTML要素のクラスを更新
+  useEffect(() => {
+    const html = document.documentElement;
+    if (theme === "dark") {
+      html.classList.add("dark");
+      html.classList.remove("light");
+    } else {
+      html.classList.add("light");
+      html.classList.remove("dark");
+    }
+    saveTheme(theme);
+  }, [theme]);
+
+  // 次のキャプチャ時刻を計算
+  useEffect(() => {
+    if (!isSharing) {
+      setNextCaptureAt(null);
+      return;
+    }
+    const updateNext = () => setNextCaptureAt(Date.now() + intervalSec * 1000);
+    updateNext();
+    const interval = setInterval(updateNext, intervalSec * 1000);
+    return () => clearInterval(interval);
+  }, [isSharing, intervalSec]);
+
+  // レポート定期生成
+  useEffect(() => {
+    if (!isSharing || reportIntervalMin <= 0) {
+      setNextReportAt(null);
+      if (reportTimerRef.current) {
+        clearInterval(reportTimerRef.current);
+        reportTimerRef.current = null;
+      }
+      return;
+    }
+
+    const generateReportAuto = async () => {
+      if (summaries.length === 0) {
+        return;
+      }
+      setIsGeneratingReport(true);
+      try {
+        const report = await generateReport(summaries);
+        setReports((prev) => {
+          const next = [report, ...prev];
+          saveReports(next);
+          return next;
+        });
+        toast.success("レポートを自動生成しました");
+      } catch (e) {
+        console.error(e);
+        toast.error("レポート自動生成に失敗しました");
+      } finally {
+        setIsGeneratingReport(false);
+      }
+    };
+
+    const updateNextReport = () =>
+      setNextReportAt(Date.now() + reportIntervalMin * 60 * 1000);
+    updateNextReport();
+
+    reportTimerRef.current = setInterval(
+      () => {
+        generateReportAuto();
+        updateNextReport();
+      },
+      reportIntervalMin * 60 * 1000
+    );
+
+    return () => {
+      if (reportTimerRef.current) {
+        clearInterval(reportTimerRef.current);
+        reportTimerRef.current = null;
+      }
+    };
+  }, [isSharing, reportIntervalMin, summaries]);
+
+  const handleStartCapture = useCallback(async () => {
+    if (isSharing) {
+      return;
+    }
+    try {
+      await startCapture(streamRef);
+      setIsSharing(true);
+      toast.success("画面共有を開始しました");
+    } catch (e) {
+      const name = (e as DOMException)?.name ?? "";
+      const isUserCancel =
+        name === "NotAllowedError" ||
+        name === "AbortError" ||
+        String(e).includes("Permission") ||
+        String(e).includes("denied");
+      if (!isUserCancel) {
+        console.error(e);
+        toast.error("画面共有に失敗しました", { description: String(e) });
+      }
+      stopCapture(streamRef);
+      setIsSharing(false);
+    }
+  }, [isSharing]);
+
+  const handleStopCapture = useCallback(() => {
+    stopCapture(streamRef);
+    setIsSharing(false);
+    toast("画面共有を停止しました");
+  }, []);
+
+  const handleAutoStopCapture = useCallback(() => {
+    setIsSharing(false);
+  }, []);
+
+  const handleGenerateReport = useCallback(async () => {
+    if (summaries.length === 0) {
+      toast.error("履歴がありません", {
+        description: "共有を開始してキャプチャを蓄積してください。",
+      });
+      return;
+    }
+    setIsGeneratingReport(true);
+    try {
+      const report = await generateReport(summaries);
+      setReports((prev) => {
+        const next = [report, ...prev];
+        saveReports(next);
+        return next;
+      });
+      toast.success("レポートを生成しました");
+    } catch (e) {
+      console.error(e);
+      toast.error("レポート生成に失敗しました", { description: String(e) });
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  }, [summaries]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  }, []);
 
   // キャプチャループ
   useCaptureLoop({
@@ -49,71 +197,70 @@ function PageContent() {
     intervalSec,
     streamRef,
     setSummaries,
-    onStopCapture: () => setIsSharing(false),
+    onStopCapture: handleAutoStopCapture,
   });
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center gap-3 bg-zinc-50 text-zinc-900">
-        <Spinner className="size-8" />
-        <span className="text-sm text-zinc-600">
-          ローカルデータを読み込み中...
+      <div className="flex h-screen items-center justify-center gap-3 bg-background">
+        <div className="size-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <span className="font-mono text-muted-foreground text-sm">
+          初期化中...
         </span>
       </div>
     );
   }
 
+  const pendingCount = summaries.filter((s) => s.status === "pending").length;
+
   return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-900">
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
-        <header className="flex items-center justify-between">
-          <div>
-            <h1 className="font-semibold text-2xl">
-              画面共有 × Prompt API 日次レポート
-            </h1>
-            <p className="text-sm text-zinc-500">
-              共有を開始して履歴を蓄積し、必要なタイミングでレポートを生成します。
-            </p>
-          </div>
-        </header>
+    <div className="relative flex h-screen flex-col overflow-hidden bg-background">
+      {/* Background gradient */}
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_top,var(--gradient-top),transparent_50%),radial-gradient(ellipse_at_bottom_right,var(--gradient-bottom),transparent_50%)]" />
 
-        <div className="grid gap-6 lg:grid-cols-[1.1fr,1fr]">
-          {/* Left column */}
-          <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
-            <CaptureControls {...controlsProps} />
-            <div className="mt-4">
-              <LivePreview streamRef={streamRef} />
-            </div>
+      <div className="relative z-10 mx-auto flex h-full w-full max-w-7xl flex-col">
+        {/* Header */}
+        <StatusHeader
+          isRecording={isSharing}
+          nextCaptureAt={nextCaptureAt}
+          nextReportAt={nextReportAt}
+          onToggleTheme={toggleTheme}
+          pendingCount={pendingCount}
+          reportCount={reports.length}
+          summaryCount={summaries.length}
+          theme={theme}
+        />
+
+        {/* Main content */}
+        <main className="flex min-h-0 flex-1 gap-6 px-6 pb-6">
+          {/* Left: Control Panel */}
+          <div className="w-72 shrink-0 overflow-auto">
+            <ControlPanel
+              intervalSec={intervalSec}
+              isSharing={isSharing}
+              onStart={handleStartCapture}
+              onStop={handleStopCapture}
+              reportIntervalMin={reportIntervalMin}
+              setIntervalSec={setIntervalSec}
+              setReportIntervalMin={setReportIntervalMin}
+              setReports={setReports}
+              setSummaries={setSummaries}
+              streamRef={streamRef}
+            />
           </div>
 
-          {/* Right column */}
-          <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
-            <Tabs
-              onValueChange={(v) => setActiveTab(v as "history" | "report")}
-              value={activeTab}
-            >
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="history">作業履歴</TabsTrigger>
-                <TabsTrigger value="report">レポート</TabsTrigger>
-              </TabsList>
-              <TabsContent className="mt-4" value="history">
-                <HistoryTab setSummaries={setSummaries} summaries={summaries} />
-              </TabsContent>
-              <TabsContent className="mt-4" value="report">
-                <ReportTab
-                  reports={reports}
-                  setReports={setReports}
-                  summaries={summaries}
-                />
-              </TabsContent>
-            </Tabs>
+          {/* Center: Timeline */}
+          <div className="min-h-0 flex-1">
+            <Timeline
+              isGeneratingReport={isGeneratingReport}
+              onGenerateReport={handleGenerateReport}
+              reports={reports}
+              setReports={setReports}
+              summaries={summaries}
+            />
           </div>
-        </div>
-      </main>
+        </main>
+      </div>
     </div>
   );
-}
-
-export default function Home() {
-  return <PageContent />;
 }

@@ -118,7 +118,7 @@ export default function ReportTab({ summaries, reports, setReports }: Props) {
                 onClick={() => setSelectedId(r.id)}
                 type="button"
               >
-                {r.title ?? new Date(r.timestamp).toLocaleString()}
+                {new Date(r.timestamp).toLocaleString()}
               </button>
             ))}
           </div>

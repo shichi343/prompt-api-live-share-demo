@@ -38,6 +38,8 @@ export function useCaptureLoop({
     }
 
     const tick = async () => {
+      let pendingId: string | null = null;
+      let requestedAt = 0;
       try {
         const track = streamRef.current?.getVideoTracks()?.[0];
         if (!track || track.readyState !== "live") {
@@ -45,10 +47,37 @@ export function useCaptureLoop({
           onStopCapture();
           return;
         }
+
         const frameBlob = await captureFrame(streamRef);
-        const recent: SummaryEntry[] = [];
-        const summaryText = await summarizeCaptures({ frameBlob, recent });
+        requestedAt = Date.now();
+        pendingId = crypto.randomUUID();
+
+        const pendingEntry: SummaryEntry = {
+          id: pendingId,
+          timestamp: requestedAt,
+          requestedAt,
+          status: "pending" as const,
+          durationMs: 0,
+        };
+
+        let recent: SummaryEntry[] = [];
+        setSummaries((prev) => {
+          recent = prev.slice(0, 5);
+          return [pendingEntry, ...prev];
+        });
+
+        const startedAt = performance.now();
+        let summaryText: string | null = null;
+        try {
+          summaryText = await summarizeCaptures({ frameBlob, recent });
+        } catch (err) {
+          console.error("Prompt API error (summary)", err);
+        }
+        const durationMs = performance.now() - startedAt;
+
         if (!summaryText) {
+          const failureSummary =
+            "サマリ生成に失敗しました。Prompt APIが無効、またはマルチモーダル入力に非対応の可能性があります。";
           if (!llmUnavailableRef.current) {
             llmUnavailableRef.current = true;
             toast.error("サマリ生成に失敗しました", {
@@ -56,19 +85,48 @@ export function useCaptureLoop({
                 "Prompt APIが無効、またはマルチモーダル入力に非対応の可能性があります。",
             });
           }
+          if (pendingId) {
+            setSummaries((prev) => {
+              const next = prev.map((item) =>
+                item.id === pendingId
+                  ? {
+                      ...item,
+                      status: "error" as const,
+                      summary: failureSummary,
+                      durationMs,
+                      errorMessage:
+                        item.errorMessage ??
+                        "Prompt APIが利用できないか、レスポンス取得に失敗しました。",
+                    }
+                  : item
+              );
+              saveSummaries(next.filter((entry) => entry.status !== "pending"));
+              return next;
+            });
+          }
           return;
         }
+
         llmUnavailableRef.current = false;
-        const entry: SummaryEntry = {
-          id: crypto.randomUUID(),
-          timestamp: Date.now(),
-          summary: summaryText,
-        };
-        setSummaries((prev) => {
-          const next = [entry, ...prev];
-          saveSummaries(next);
-          return next;
-        });
+        if (pendingId) {
+          setSummaries((prev) => {
+            const next = prev.map((item) =>
+              item.id === pendingId
+                ? {
+                    ...item,
+                    status: "success" as const,
+                    summary: summaryText,
+                    durationMs,
+                    requestedAt,
+                    timestamp: requestedAt,
+                    errorMessage: undefined,
+                  }
+                : item
+            );
+            saveSummaries(next.filter((entry) => entry.status !== "pending"));
+            return next;
+          });
+        }
       } catch (e) {
         const msg = String(e);
         if (msg.includes("InvalidStateError")) {
@@ -79,6 +137,23 @@ export function useCaptureLoop({
               "ブラウザ側で共有が終了したためキャプチャを停止しました。",
           });
           return;
+        }
+        if (pendingId) {
+          setSummaries((prev) => {
+            const next = prev.map((item) =>
+              item.id === pendingId
+                ? {
+                    ...item,
+                    status: "error" as const,
+                    summary: "サマリ生成中にエラーが発生しました。",
+                    errorMessage: msg,
+                    durationMs: item.durationMs ?? 0,
+                  }
+                : item
+            );
+            saveSummaries(next.filter((entry) => entry.status !== "pending"));
+            return next;
+          });
         }
         toast.error("キャプチャに失敗しました", { description: msg });
       }

@@ -36,6 +36,7 @@ async function createSession(
 function buildReportPrompt(summaries: SummaryEntry[]) {
   const rows =
     summaries
+      .filter((s) => (s.status ?? "success") === "success")
       .slice(0, 30)
       .map((s) => {
         return `${new Date(s.timestamp).toLocaleTimeString()} | ${s.summary ?? "サマリ未取得"}`;
@@ -86,7 +87,6 @@ function buildReportFallback(
     id: crypto.randomUUID(),
     timestamp: now,
     markdown: fallbackMarkdown,
-    title: new Date(now).toLocaleString(),
   };
 }
 
@@ -103,7 +103,6 @@ export async function generateReport(
         id: crypto.randomUUID(),
         timestamp: now,
         markdown: result,
-        title: new Date(now).toLocaleString(),
       };
     }
   } catch (e) {

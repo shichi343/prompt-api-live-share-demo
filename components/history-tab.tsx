@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { loadSummariesPaged } from "@/lib/storage";
 import type { SummaryEntry } from "@/types";
+import { Spinner } from "./ui/spinner";
 
 interface Props {
   summaries: SummaryEntry[];
@@ -49,12 +50,45 @@ export default function HistoryTab({ summaries, setSummaries }: Props) {
             className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2"
             key={item.id}
           >
-            <div className="flex items-center justify-between text-xs text-zinc-500">
-              <span>{new Date(item.timestamp).toLocaleString()}</span>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
+              <span>
+                {new Date(item.requestedAt ?? item.timestamp).toLocaleString()}
+                にリクエスト
+              </span>
+              <div className="flex items-center gap-2">
+                {typeof item.durationMs === "number" &&
+                  (item.status ?? "success") === "success" && (
+                    <span className="text-zinc-600">
+                      処理時間 {(item.durationMs / 1000).toFixed(1)}s
+                    </span>
+                  )}
+                {(item.status ?? "success") === "pending" && (
+                  <span className="flex items-center text-amber-600">
+                    <Spinner className="size-5" />
+                    <span className="sr-only">生成中</span>
+                  </span>
+                )}
+                {(item.status ?? "success") === "error" && (
+                  <span className="text-red-500">失敗</span>
+                )}
+              </div>
             </div>
-            <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-800">
-              {item.summary}
-            </p>
+            {(item.status ?? "success") === "pending" ? (
+              <div className="mt-2 flex items-center justify-center rounded-md border border-amber-200 border-dashed bg-amber-50 py-4 text-amber-600">
+                <Spinner className="size-6" />
+                <span className="sr-only">生成中</span>
+              </div>
+            ) : (
+              <p
+                className="mt-1 whitespace-pre-wrap text-sm text-zinc-800"
+                data-status={item.status ?? "success"}
+              >
+                {item.summary ?? "サマリ未設定"}
+              </p>
+            )}
+            {(item.status ?? "success") === "error" && item.errorMessage && (
+              <p className="mt-1 text-red-500 text-xs">{item.errorMessage}</p>
+            )}
           </div>
         ))}
       </div>
