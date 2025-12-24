@@ -83,7 +83,7 @@ export default function HistoryTab({ summaries, setSummaries }: Props) {
                 className="mt-1 whitespace-pre-wrap text-sm text-zinc-800"
                 data-status={item.status ?? "success"}
               >
-                {item.summary ?? "サマリ未設定"}
+                {item.summary ?? ""}
               </p>
             )}
             {(item.status ?? "success") === "error" && item.errorMessage && (

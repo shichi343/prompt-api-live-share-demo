@@ -1,16 +1,24 @@
-import type { ReportEntry, SummaryEntry } from "@/types";
+import type { SummaryEntry } from "@/types";
 
 const REPORT_SYSTEM_PROMPT = `
-あなたは一日の作業報告書をMarkdownで作成するアシスタントです。
-入力は時刻付きの作業サマリ一覧です。以下を含めてください:
-- 箇条書きでの作業内容と成果
-- 発生した課題と次のアクション
-- 必要なら簡潔なまとめ
+あなたはパソコンの操作観測ログから作業レポートを作るアシスタントです。
+入力には意図や操作ログは含まれません。観測ログと時刻だけが根拠です。
+
+ルール:
+- 断定しない。推定は「〜の可能性」「〜と思われる」と明記する。
+- 操作観測ログに書かれていない具体情報（固有名詞、ID、顧客名など）を創作しない。
+- 報告書は読み手に役立つよう、(1)サマリー (2)タイムライン (3)成果 の順で。
 `;
 
 const SUMMARY_SYSTEM_PROMPT = `
-あなたは画面共有から得た情報をもとに、1行の簡潔な作業サマリを作るアシスタントです。
-日本語で、50文字程度以内にまとめてください。余計な挨拶や引用符は不要です。
+あなたは作業画面スクリーンショットの「観測」だけを記述するアシスタントです。
+入力はスクリーンショット画像のみです。
+
+ルール:
+- 推測しない。ユーザーの意図や操作（クリックした、実行した等）は書かない。
+- 画面に見えている要素のみを短い文章で書く（箇条書きにしない）。
+- 文章は日本語。2〜3文程度で簡潔に。
+- 余計な前置きは不要。説明文だけを出力する。
 `;
 
 async function createSession(
@@ -28,7 +36,8 @@ async function createSession(
       expectedInputs,
       expectedOutputs: [{ type: "text", languages: ["ja"] }],
     });
-  } catch {
+  } catch (e) {
+    console.error("Failed to create LanguageModel session", e);
     return null;
   }
 }
@@ -37,13 +46,25 @@ function buildReportPrompt(summaries: SummaryEntry[]) {
   const rows =
     summaries
       .filter((s) => (s.status ?? "success") === "success")
-      .slice(0, 30)
       .map((s) => {
-        return `${new Date(s.timestamp).toLocaleTimeString()} | ${s.summary ?? "サマリ未取得"}`;
+        return `${new Date(s.timestamp).toLocaleTimeString()}\n${s.summary ?? "観測がありません"}`;
       })
-      .join("\n") || "履歴がありません。";
+      .join("\n\n") || "履歴がありません。";
 
-  return `以下は時系列の作業サマリです。Markdownで日次レポートを作成してください。\n\n${rows}`;
+  const requirements = [
+    "セッション（作業のまとまり）ごとに区切ってタイムライン化する",
+    "推定は推定と明記する",
+  ].join("\n- ");
+
+  return [
+    "以下は観測ログです。これを根拠に、作業報告書をMarkdownで作ってください。",
+    "",
+    "観測ログ（時系列）:",
+    rows,
+    "",
+    "要件:",
+    `- ${requirements}`,
+  ].join("\n");
 }
 
 async function callPromptAPI(
@@ -59,6 +80,9 @@ async function callPromptAPI(
   try {
     const result = await session.prompt(prompt);
     return result;
+  } catch (e) {
+    console.error("Prompt API call error", e);
+    return null;
   } finally {
     if (session.destroy) {
       session.destroy();
@@ -66,68 +90,30 @@ async function callPromptAPI(
   }
 }
 
-function buildReportFallback(
-  now: number,
-  summaries: SummaryEntry[]
-): ReportEntry {
-  const header = `# 日次作業レポート (${new Date(now).toLocaleString()})`;
-  let body = "- サマリがありません";
-  const lines: string[] = [];
-  for (const s of summaries.slice(0, 30)) {
-    const line = `- ${new Date(s.timestamp).toLocaleTimeString()} : ${s.summary ?? "サマリ未取得"}`;
-    lines.push(line);
-  }
-  if (lines.length > 0) {
-    body = lines.join("\n");
-  }
-
-  const fallbackMarkdown = `${header}\n\n## 概要\n${body}\n\n*内蔵LLMが未使用のため簡易出力です。*`;
-
-  return {
-    id: crypto.randomUUID(),
-    timestamp: now,
-    markdown: fallbackMarkdown,
-  };
-}
-
 export async function generateReport(
   summaries: SummaryEntry[]
-): Promise<ReportEntry> {
-  const now = Date.now();
+): Promise<{ markdown: string } | undefined> {
   const prompt = buildReportPrompt(summaries);
 
   try {
     const result = await callPromptAPI(REPORT_SYSTEM_PROMPT, prompt);
     if (result) {
-      return {
-        id: crypto.randomUUID(),
-        timestamp: now,
-        markdown: result,
-      };
+      return { markdown: result };
     }
   } catch (e) {
     console.error("Prompt API error (report)", e);
   }
 
-  return buildReportFallback(now, summaries);
+  return undefined;
 }
 
-export async function summarizeCaptures(params: {
+export async function generateCaptureSummary(params: {
   frameBlob?: Blob;
-  recent: SummaryEntry[];
-}): Promise<string | null> {
-  const { frameBlob, recent } = params;
+}): Promise<string | undefined> {
+  const { frameBlob } = params;
 
-  const context =
-    recent
-      .slice(0, 5)
-      .map(
-        (s) =>
-          `${new Date(s.timestamp).toLocaleTimeString()} | ${s.summary ?? ""}`
-      )
-      .join("\n") || "直近の履歴はありません。";
-
-  const prompt = `以下はこれまでの作業サマリです。\n${context}\n\n画面キャプチャから1行で最新の作業サマリを作ってください。`;
+  const prompt =
+    "このスクリーンショットで見えていることを、日本語の文章で説明してください。推測や箇条書きは禁止です。";
 
   try {
     const messages: LanguageModelPrompt = [
@@ -147,7 +133,7 @@ export async function summarizeCaptures(params: {
       { type: "image" },
     ]);
     if (!session) {
-      return null;
+      return undefined;
     }
     const result = await session.prompt(messages);
     session.destroy?.();
@@ -158,5 +144,5 @@ export async function summarizeCaptures(params: {
     console.error("Prompt API error (summary)", e);
   }
 
-  return null;
+  return undefined;
 }

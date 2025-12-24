@@ -22,7 +22,7 @@ import type { ReportEntry, SummaryEntry } from "@/types";
 export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSharing, setIsSharing] = useState(false);
-  const [intervalSec, setIntervalSec] = useState<number>(10);
+  const [intervalSec, setIntervalSec] = useState<number>(30);
   const [reportIntervalMin, setReportIntervalMin] = useState<number>(30);
   const [summaries, setSummaries] = useState<SummaryEntry[]>([]);
   const [reports, setReports] = useState<ReportEntry[]>([]);
@@ -32,6 +32,12 @@ export default function Home() {
   const [theme, setTheme] = useState<"light" | "dark">("dark");
   const streamRef = useRef<MediaStream | null>(null);
   const reportTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const summariesRef = useRef<SummaryEntry[]>([]);
+
+  // 最新 summaries を参照用に保持（依存関係に使わない）
+  useEffect(() => {
+    summariesRef.current = summaries;
+  }, [summaries]);
 
   // 初期ロード
   useEffect(() => {
@@ -81,36 +87,97 @@ export default function Home() {
   useEffect(() => {
     if (!isSharing || reportIntervalMin <= 0) {
       setNextReportAt(null);
-      if (reportTimerRef.current) {
-        clearInterval(reportTimerRef.current);
+      const timer = reportTimerRef.current;
+      if (timer) {
+        clearInterval(timer);
         reportTimerRef.current = null;
       }
       return;
     }
 
     const generateReportAuto = async () => {
-      if (summaries.length === 0) {
+      const currentSummaries = summariesRef.current;
+      if (currentSummaries.length === 0) {
         return;
       }
+
+      const pendingId = crypto.randomUUID();
+      const requestedAt = Date.now();
+
+      const pendingReport: ReportEntry = {
+        id: pendingId,
+        timestamp: requestedAt,
+        requestedAt,
+        status: "pending",
+        durationMs: 0,
+      };
+
+      setReports((prev) => [pendingReport, ...prev]);
       setIsGeneratingReport(true);
+
+      const startedAt = performance.now();
       try {
-        const report = await generateReport(summaries);
+        const result = await generateReport(currentSummaries);
+        const durationMs = performance.now() - startedAt;
+
         setReports((prev) => {
-          const next = [report, ...prev];
-          saveReports(next);
+          const next = prev.map((r) =>
+            r.id === pendingId
+              ? result
+                ? {
+                    ...r,
+                    status: "success" as const,
+                    markdown: result.markdown,
+                    durationMs,
+                    errorMessage: undefined,
+                  }
+                : {
+                    ...r,
+                    status: "error" as const,
+                    durationMs,
+                    errorMessage:
+                      "レポート生成に失敗しました。Prompt APIが無効か、レスポンスが取得できませんでした。",
+                  }
+              : r
+          );
+          saveReports(next.filter((r) => r.status !== "pending"));
           return next;
         });
-        toast.success("レポートを自動生成しました");
+
+        if (result) {
+          toast.success("レポートを自動生成しました");
+        } else {
+          toast.error("レポート自動生成に失敗しました");
+        }
       } catch (e) {
-        console.error(e);
-        toast.error("レポート自動生成に失敗しました");
+        const durationMs = performance.now() - startedAt;
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        setReports((prev) => {
+          const next = prev.map((r) =>
+            r.id === pendingId
+              ? {
+                  ...r,
+                  status: "error" as const,
+                  durationMs,
+                  errorMessage,
+                }
+              : r
+          );
+          saveReports(next.filter((r) => r.status !== "pending"));
+          return next;
+        });
+        toast.error("レポート自動生成に失敗しました", {
+          description: errorMessage,
+        });
       } finally {
         setIsGeneratingReport(false);
       }
     };
 
-    const updateNextReport = () =>
-      setNextReportAt(Date.now() + reportIntervalMin * 60 * 1000);
+    const updateNextReport = () => {
+      const next = Date.now() + reportIntervalMin * 60 * 1000;
+      setNextReportAt(next);
+    };
     updateNextReport();
 
     reportTimerRef.current = setInterval(
@@ -122,12 +189,13 @@ export default function Home() {
     );
 
     return () => {
-      if (reportTimerRef.current) {
-        clearInterval(reportTimerRef.current);
+      const timer = reportTimerRef.current;
+      if (timer) {
+        clearInterval(timer);
         reportTimerRef.current = null;
       }
     };
-  }, [isSharing, reportIntervalMin, summaries]);
+  }, [isSharing, reportIntervalMin]);
 
   const handleStartCapture = useCallback(async () => {
     if (isSharing) {
@@ -170,18 +238,75 @@ export default function Home() {
       });
       return;
     }
+
+    const pendingId = crypto.randomUUID();
+    const requestedAt = Date.now();
+
+    const pendingReport: ReportEntry = {
+      id: pendingId,
+      timestamp: requestedAt,
+      requestedAt,
+      status: "pending",
+      durationMs: 0,
+    };
+
+    setReports((prev) => [pendingReport, ...prev]);
     setIsGeneratingReport(true);
+
+    const startedAt = performance.now();
     try {
-      const report = await generateReport(summaries);
+      const result = await generateReport(summaries);
+      const durationMs = performance.now() - startedAt;
+
       setReports((prev) => {
-        const next = [report, ...prev];
-        saveReports(next);
+        const next = prev.map((r) =>
+          r.id === pendingId
+            ? result
+              ? {
+                  ...r,
+                  status: "success" as const,
+                  markdown: result.markdown,
+                  durationMs,
+                  errorMessage: undefined,
+                }
+              : {
+                  ...r,
+                  status: "error" as const,
+                  durationMs,
+                  errorMessage:
+                    "レポート生成に失敗しました。Prompt APIが無効か、レスポンスが取得できませんでした。",
+                }
+            : r
+        );
+        saveReports(next.filter((r) => r.status !== "pending"));
         return next;
       });
-      toast.success("レポートを生成しました");
+
+      if (result) {
+        toast.success("レポートを生成しました");
+      } else {
+        toast.error("レポート生成に失敗しました");
+      }
     } catch (e) {
-      console.error(e);
-      toast.error("レポート生成に失敗しました", { description: String(e) });
+      const durationMs = performance.now() - startedAt;
+      setReports((prev) => {
+        const next = prev.map((r) =>
+          r.id === pendingId
+            ? {
+                ...r,
+                status: "error" as const,
+                durationMs,
+                errorMessage: String(e),
+              }
+            : r
+        );
+        saveReports(next.filter((r) => r.status !== "pending"));
+        return next;
+      });
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      toast.error("レポート生成に失敗しました", {
+        description: errorMessage,
+      });
     } finally {
       setIsGeneratingReport(false);
     }
@@ -221,12 +346,14 @@ export default function Home() {
       <div className="relative z-10 mx-auto flex h-full w-full max-w-7xl flex-col">
         {/* Header */}
         <StatusHeader
+          captureIntervalSec={intervalSec}
           isRecording={isSharing}
           nextCaptureAt={nextCaptureAt}
           nextReportAt={nextReportAt}
           onToggleTheme={toggleTheme}
           pendingCount={pendingCount}
           reportCount={reports.length}
+          reportIntervalMin={reportIntervalMin}
           summaryCount={summaries.length}
           theme={theme}
         />
@@ -255,7 +382,6 @@ export default function Home() {
               isGeneratingReport={isGeneratingReport}
               onGenerateReport={handleGenerateReport}
               reports={reports}
-              setReports={setReports}
               summaries={summaries}
             />
           </div>

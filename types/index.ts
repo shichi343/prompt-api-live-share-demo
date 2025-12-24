@@ -11,7 +11,11 @@ export interface SummaryEntry {
 export interface ReportEntry {
   id: string;
   timestamp: number;
-  markdown: string;
+  markdown?: string;
+  requestedAt: number;
+  durationMs: number;
+  status: "pending" | "success" | "error";
+  errorMessage?: string;
 }
 
 // タイムライン表示用の統合型

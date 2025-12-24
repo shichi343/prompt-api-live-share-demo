@@ -1,8 +1,7 @@
 "use client";
 
 import {
-  AlertCircle,
-  CheckCircle2,
+  Camera,
   ChevronDown,
   ChevronUp,
   Clock,
@@ -11,18 +10,15 @@ import {
   Filter,
   Loader2,
   Plus,
-  Trash2,
 } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { saveReports } from "@/lib/storage";
 import type { ReportEntry, SummaryEntry, TimelineEntry } from "@/types";
 import MarkdownViewer from "./markdown-viewer";
 
 interface Props {
   summaries: SummaryEntry[];
   reports: ReportEntry[];
-  setReports: (fn: (r: ReportEntry[]) => ReportEntry[]) => void;
   isGeneratingReport: boolean;
   onGenerateReport: () => void;
 }
@@ -30,7 +26,6 @@ interface Props {
 export default function Timeline({
   summaries,
   reports,
-  setReports,
   isGeneratingReport,
   onGenerateReport,
 }: Props) {
@@ -57,21 +52,6 @@ export default function Timeline({
 
     return entries;
   }, [summaries, reports, showReportsOnly]);
-
-  const handleDeleteReport = useCallback(
-    (id: string) => {
-      setReports((prev) => {
-        const next = prev.filter((r) => r.id !== id);
-        saveReports(next);
-        return next;
-      });
-      if (expandedReportId === id) {
-        setExpandedReportId(null);
-      }
-      toast("レポートを削除しました");
-    },
-    [expandedReportId, setReports]
-  );
 
   const handleCopyReport = useCallback(async (markdown: string) => {
     try {
@@ -151,32 +131,20 @@ export default function Timeline({
             </div>
           </div>
         ) : (
-          <div className="relative ml-4">
-            {/* Timeline line */}
-            <div className="absolute top-4 bottom-4 left-0 w-px bg-border" />
-
-            {/* Timeline items */}
-            <div className="space-y-3 pl-6">
-              {timelineEntries.map((entry, index) =>
-                entry.type === "summary" ? (
-                  <SummaryItem
-                    isFirst={index === 0}
-                    item={entry.data}
-                    key={entry.data.id}
-                  />
-                ) : (
-                  <ReportItem
-                    expandedId={expandedReportId}
-                    isFirst={index === 0}
-                    item={entry.data}
-                    key={entry.data.id}
-                    onCopy={handleCopyReport}
-                    onDelete={handleDeleteReport}
-                    onToggleExpand={setExpandedReportId}
-                  />
-                )
-              )}
-            </div>
+          <div className="space-y-3">
+            {timelineEntries.map((entry) =>
+              entry.type === "summary" ? (
+                <SummaryItem item={entry.data} key={entry.data.id} />
+              ) : (
+                <ReportItem
+                  expandedId={expandedReportId}
+                  item={entry.data}
+                  key={entry.data.id}
+                  onCopy={handleCopyReport}
+                  onToggleExpand={setExpandedReportId}
+                />
+              )
+            )}
           </div>
         )}
       </div>
@@ -184,64 +152,22 @@ export default function Timeline({
   );
 }
 
-function SummaryItem({
-  item,
-  isFirst,
-}: {
-  item: SummaryEntry;
-  isFirst: boolean;
-}) {
+function SummaryItem({ item }: { item: SummaryEntry }) {
   const status = item.status ?? "success";
 
-  const statusConfig = {
-    pending: {
-      icon: Loader2,
-      color: "text-amber-500",
-      bg: "bg-amber-500/20",
-      border: "border-amber-500/30",
-      iconClass: "animate-spin",
-    },
-    success: {
-      icon: CheckCircle2,
-      color: "text-emerald-500",
-      bg: "bg-emerald-500/20",
-      border: "border-emerald-500/30",
-      iconClass: "",
-    },
-    error: {
-      icon: AlertCircle,
-      color: "text-red-500",
-      bg: "bg-red-500/20",
-      border: "border-red-500/30",
-      iconClass: "",
-    },
-  };
-
-  const config = statusConfig[status];
-
   return (
-    <div
-      className={`relative ${isFirst ? "animate-fade-in-up" : ""}`}
-      style={{ animationDelay: isFirst ? "0ms" : undefined }}
-    >
-      {/* Timeline dot */}
-      <div
-        className={`absolute top-3 -left-6 flex size-3 items-center justify-center rounded-full ${config.bg}`}
-        style={{ transform: "translateX(-50%)" }}
-      >
-        <div
-          className={`size-1.5 rounded-full ${config.color.replace("text-", "bg-")}`}
-        />
-      </div>
-
+    <div>
       {/* Content */}
       <div className="rounded-lg border border-border bg-background p-3 transition-colors hover:bg-muted/20">
-        <div className="mb-1 flex items-center justify-between">
-          <span className="font-mono text-[10px] text-muted-foreground">
-            {new Date(item.requestedAt ?? item.timestamp).toLocaleTimeString(
-              "ja-JP"
-            )}
-          </span>
+        <div className="mb-1.5 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Camera className="size-3.5 text-muted-foreground" />
+            <span className="font-mono text-[10px] text-muted-foreground">
+              {new Date(item.requestedAt ?? item.timestamp).toLocaleTimeString(
+                "ja-JP"
+              )}
+            </span>
+          </div>
           {status === "success" && typeof item.durationMs === "number" && (
             <span className="rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground/70">
               {(item.durationMs / 1000).toFixed(1)}s
@@ -250,13 +176,15 @@ function SummaryItem({
         </div>
 
         {status === "pending" ? (
-          <div className="flex items-center gap-2 py-1 text-amber-500">
-            <Loader2 className="size-3.5 animate-spin" />
-            <span className="font-mono text-xs">サマリを生成中...</span>
+          <div className="flex items-center gap-2 py-1">
+            <Loader2 className="size-3.5 animate-spin text-amber-500" />
+            <span className="font-mono text-muted-foreground text-xs">
+              サマリを生成中...
+            </span>
           </div>
         ) : (
           <p className="font-sans text-foreground text-sm leading-relaxed">
-            {item.summary ?? "サマリ未設定"}
+            {item.summary ?? ""}
           </p>
         )}
 
@@ -272,90 +200,123 @@ function SummaryItem({
 
 function ReportItem({
   item,
-  isFirst,
   expandedId,
-  onToggleExpand,
-  onDelete,
   onCopy,
+  onToggleExpand,
 }: {
   item: ReportEntry;
-  isFirst: boolean;
   expandedId: string | null;
-  onToggleExpand: (id: string | null) => void;
-  onDelete: (id: string) => void;
   onCopy: (markdown: string) => void;
+  onToggleExpand: (id: string | null) => void;
 }) {
   const isExpanded = expandedId === item.id;
+  const status = item.status ?? "success";
+
+  // Accordion clickable for success status
+  const isClickable = status === "success";
 
   return (
-    <div
-      className={`relative ${isFirst ? "animate-fade-in-up" : ""}`}
-      style={{ animationDelay: isFirst ? "0ms" : undefined }}
-    >
-      {/* Timeline dot */}
+    <div>
+      {/* Wrapper - entire element is clickable for accordion */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: Accordion trigger with role=button */}
+      {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Accordion trigger with role=button */}
       <div
-        className="absolute top-3 -left-6 flex size-3 items-center justify-center rounded-full bg-primary/30"
-        style={{ transform: "translateX(-50%)" }}
-      >
-        <div className="size-1.5 rounded-full bg-primary" />
-      </div>
-
-      {/* Content */}
-      <div
-        className={`rounded-lg border-2 border-primary/30 bg-background transition-colors ${
-          isExpanded ? "" : "hover:border-primary/50"
+        className={`rounded-lg border-2 border-primary/40 bg-primary/5 p-3 transition-colors ${
+          isClickable ? "cursor-pointer hover:bg-primary/10" : ""
         }`}
+        onClick={
+          isClickable
+            ? () => onToggleExpand(isExpanded ? null : item.id)
+            : undefined
+        }
+        onKeyDown={
+          isClickable
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onToggleExpand(isExpanded ? null : item.id);
+                }
+              }
+            : undefined
+        }
+        role={isClickable ? "button" : undefined}
+        tabIndex={isClickable ? 0 : undefined}
       >
-        {/* Header - clickable */}
-        <button
-          className="flex w-full items-center justify-between px-3 py-2.5 text-left"
-          onClick={() => onToggleExpand(isExpanded ? null : item.id)}
-          type="button"
-        >
+        {/* Time & Duration row - same as Summary */}
+        <div className="mb-1.5 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <FileText className="size-4 text-primary" />
-            <span className="font-medium font-mono text-foreground text-sm">
-              日次レポート
-            </span>
+            <FileText className="size-3.5 text-muted-foreground" />
             <span className="font-mono text-[10px] text-muted-foreground">
-              {new Date(item.timestamp).toLocaleString("ja-JP")}
+              {new Date(item.requestedAt ?? item.timestamp).toLocaleTimeString(
+                "ja-JP"
+              )}
             </span>
           </div>
-          {isExpanded ? (
-            <ChevronUp className="size-4 text-muted-foreground" />
-          ) : (
-            <ChevronDown className="size-4 text-muted-foreground" />
+          {status === "success" && typeof item.durationMs === "number" && (
+            <span className="rounded bg-primary/20 px-1.5 py-0.5 font-mono text-[9px] text-primary">
+              {(item.durationMs / 1000).toFixed(1)}s
+            </span>
           )}
-        </button>
+        </div>
 
-        {/* Expanded content */}
-        {isExpanded && (
-          <div className="border-primary/20 border-t bg-muted/30 px-3 pb-3">
-            {/* Actions */}
-            <div className="flex items-center gap-2 py-3">
-              <button
-                className="flex items-center gap-1.5 rounded-md bg-background px-2.5 py-1.5 font-mono text-muted-foreground text-xs shadow-sm ring-1 ring-border transition-colors hover:bg-muted hover:text-foreground"
-                onClick={() => onCopy(item.markdown)}
-                type="button"
-              >
-                <Copy className="size-3" />
-                コピー
-              </button>
-              <button
-                className="flex items-center gap-1.5 rounded-md bg-destructive/10 px-2.5 py-1.5 font-mono text-destructive text-xs ring-1 ring-destructive/30 transition-colors hover:bg-destructive/20"
-                onClick={() => onDelete(item.id)}
-                type="button"
-              >
-                <Trash2 className="size-3" />
-                削除
-              </button>
-            </div>
-
-            {/* Markdown */}
-            <div className="rounded-lg border border-border bg-background p-4">
-              <MarkdownViewer markdown={item.markdown} />
-            </div>
+        {/* Content area */}
+        {status === "pending" ? (
+          <div className="flex items-center gap-2 py-1">
+            <Loader2 className="size-3.5 animate-spin text-amber-500" />
+            <span className="font-mono text-muted-foreground text-xs">
+              レポートを生成中...
+            </span>
           </div>
+        ) : status === "error" ? (
+          <div className="flex flex-col gap-1">
+            {item.errorMessage && (
+              <p className="mt-2 rounded bg-red-500/10 px-2 py-1 font-mono text-[10px] text-red-500">
+                {item.errorMessage}
+              </p>
+            )}
+          </div>
+        ) : (
+          <>
+            {/* Accordion header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText className="size-4 text-primary" />
+                <span className="font-semibold text-foreground text-sm">
+                  作業レポート
+                </span>
+              </div>
+              {isExpanded ? (
+                <ChevronUp className="size-5 text-primary" />
+              ) : (
+                <ChevronDown className="size-5 text-muted-foreground" />
+              )}
+            </div>
+
+            {/* Expanded content - markdown container with copy button */}
+            {isExpanded && item.markdown && (
+              // biome-ignore lint/a11y/noStaticElementInteractions: Prevents accordion toggle
+              // biome-ignore lint/a11y/useKeyWithClickEvents: Only prevents propagation
+              // biome-ignore lint/a11y/noNoninteractiveElementInteractions: Wrapper prevents propagation
+              <div
+                className="relative mt-3 rounded-lg border border-primary/20 bg-background/50 p-3"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Copy button */}
+                <button
+                  className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md bg-background/90 px-2 py-1 font-mono text-[10px] text-muted-foreground ring-1 ring-border backdrop-blur-sm transition-colors hover:bg-muted hover:text-foreground"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCopy(item.markdown ?? "");
+                  }}
+                  type="button"
+                >
+                  <Copy className="size-3" />
+                  コピー
+                </button>
+                <MarkdownViewer markdown={item.markdown} />
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

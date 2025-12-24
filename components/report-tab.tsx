@@ -33,15 +33,28 @@ export default function ReportTab({ summaries, reports, setReports }: Props) {
     setLoading(true);
     try {
       const report = await generateReport(summaries);
+      if (!report) {
+        toast.error("レポート生成に失敗しました", {
+          description: "Prompt APIが無効か、レスポンスが取得できませんでした。",
+        });
+        return;
+      }
+      const entry: ReportEntry = {
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        requestedAt: Date.now(),
+        durationMs: 0,
+        status: "success",
+        markdown: report.markdown,
+      };
       setReports((prev) => {
-        const next = [report, ...prev];
+        const next = [entry, ...prev];
         saveReports(next);
         return next;
       });
-      setSelectedId(report.id);
+      setSelectedId(entry.id);
       toast.success("レポートを生成しました");
     } catch (e) {
-      console.error(e);
       toast.error("レポート生成に失敗しました", { description: String(e) });
     } finally {
       setLoading(false);
@@ -49,7 +62,7 @@ export default function ReportTab({ summaries, reports, setReports }: Props) {
   };
 
   const handleCopy = async () => {
-    if (!selected) {
+    if (!selected || !selected.markdown) {
       return;
     }
     try {
@@ -129,7 +142,13 @@ export default function ReportTab({ summaries, reports, setReports }: Props) {
             レポート表示
           </h3>
           {selected ? (
-            <MarkdownViewer markdown={selected.markdown} />
+            selected.markdown ? (
+              <MarkdownViewer markdown={selected.markdown} />
+            ) : (
+              <p className="text-sm text-zinc-500">
+                レポートの内容がありません。
+              </p>
+            )
           ) : (
             <p className="text-sm text-zinc-500">
               レポートを選択してください。

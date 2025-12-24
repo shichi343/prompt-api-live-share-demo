@@ -48,7 +48,7 @@ export function loadSummaries(): SummaryEntry[] {
     return parsed.map((item) => ({
       id: item.id ?? crypto.randomUUID(),
       timestamp: item.timestamp ?? Date.now(),
-      summary: item.summary ?? "サマリ未取得",
+      summary: item.summary,
       requestedAt: item.requestedAt ?? item.timestamp ?? Date.now(),
       durationMs: item.durationMs ?? 0,
       status: item.status ?? "success",

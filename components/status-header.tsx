@@ -7,6 +7,8 @@ interface Props {
   isRecording: boolean;
   nextCaptureAt: number | null;
   nextReportAt: number | null;
+  captureIntervalSec: number;
+  reportIntervalMin: number;
   pendingCount: number;
   summaryCount: number;
   reportCount: number;
@@ -18,6 +20,8 @@ export default function StatusHeader({
   isRecording,
   nextCaptureAt,
   nextReportAt,
+  captureIntervalSec,
+  reportIntervalMin,
   pendingCount,
   summaryCount,
   reportCount,
@@ -35,7 +39,7 @@ export default function StatusHeader({
           <h1 className="font-mono font-semibold text-lg text-primary tracking-tight">
             デスクワークトラッカー
           </h1>
-          <p className="font-mono text-xs text-muted-foreground">
+          <p className="font-mono text-muted-foreground text-xs">
             ブラウザで動くセキュアな AI で、あなたの仕事をデータに残す
           </p>
         </div>
@@ -57,20 +61,29 @@ export default function StatusHeader({
           </span>
         </div>
 
-        {/* Countdown */}
+        {/* Countdown - Capture */}
         {isRecording && nextCaptureAt && (
-          <CountdownDisplay label="CAP" targetTime={nextCaptureAt} />
+          <CountdownDisplay
+            intervalSec={captureIntervalSec}
+            label="CAP"
+            targetTime={nextCaptureAt}
+          />
         )}
 
-        {/* Next Report */}
+        {/* Countdown - Report */}
         {isRecording && nextReportAt && (
-          <CountdownDisplay label="RPT" showMinutes targetTime={nextReportAt} />
+          <CountdownDisplay
+            intervalSec={reportIntervalMin * 60}
+            label="RPT"
+            showMinutes
+            targetTime={nextReportAt}
+          />
         )}
 
         {/* Stats */}
         <div className="flex items-center gap-3 border-border/50 border-l pl-5">
           <div className="text-center">
-            <div className="font-mono font-semibold text-foreground text-sm">
+            <div className="font-mono font-semibold text-foreground text-sm tabular-nums">
               {summaryCount}
             </div>
             <div className="font-mono text-[9px] text-muted-foreground">
@@ -79,7 +92,7 @@ export default function StatusHeader({
           </div>
 
           <div className="text-center">
-            <div className="font-mono font-semibold text-foreground text-sm">
+            <div className="font-mono font-semibold text-foreground text-sm tabular-nums">
               {reportCount}
             </div>
             <div className="font-mono text-[9px] text-muted-foreground">
@@ -87,16 +100,19 @@ export default function StatusHeader({
             </div>
           </div>
 
-          {pendingCount > 0 && (
-            <div className="text-center">
-              <div className="font-mono font-semibold text-amber-500 text-sm">
-                {pendingCount}
-              </div>
-              <div className="font-mono text-[9px] text-muted-foreground">
-                WAIT
-              </div>
+          {/* WAIT - Always visible */}
+          <div className="text-center">
+            <div
+              className={`font-mono font-semibold text-sm tabular-nums ${
+                pendingCount > 0 ? "text-amber-500" : "text-foreground"
+              }`}
+            >
+              {pendingCount}
             </div>
-          )}
+            <div className="font-mono text-[9px] text-muted-foreground">
+              WAIT
+            </div>
+          </div>
         </div>
 
         {/* Theme Toggle */}
@@ -119,10 +135,12 @@ export default function StatusHeader({
 function CountdownDisplay({
   targetTime,
   label,
+  intervalSec,
   showMinutes = false,
 }: {
   targetTime: number;
   label: string;
+  intervalSec: number;
   showMinutes?: boolean;
 }) {
   const [remaining, setRemaining] = useState(0);
@@ -136,6 +154,13 @@ function CountdownDisplay({
     const interval = setInterval(update, 100);
     return () => clearInterval(interval);
   }, [targetTime]);
+
+  // Calculate progress (0 to 100) based on remaining time vs interval
+  const progress = Math.min(100, (remaining / intervalSec) * 100);
+
+  // SVG circle circumference = 2 * PI * r = 2 * PI * 16 ≈ 100.53
+  const circumference = 2 * Math.PI * 16;
+  const strokeDashoffset = circumference - (progress / 100) * circumference;
 
   const displayValue = showMinutes
     ? `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}`
@@ -163,17 +188,14 @@ function CountdownDisplay({
           fill="none"
           r="16"
           stroke="currentColor"
-          strokeDasharray="100"
-          strokeDashoffset={
-            showMinutes
-              ? 100 - (remaining / (30 * 60)) * 100
-              : 100 - (remaining / 10) * 100
-          }
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
           strokeLinecap="round"
           strokeWidth="2"
         />
       </svg>
-      <span className="font-mono text-muted-foreground text-xs tabular-nums">
+      {/* Fixed width for time display */}
+      <span className="inline-block w-6 font-mono text-muted-foreground text-xs tabular-nums">
         {displayValue}
       </span>
     </div>

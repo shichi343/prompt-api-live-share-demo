@@ -1,10 +1,21 @@
 "use client";
 
-import { Clock, Pause, Play, RefreshCw, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useRef } from "react";
+import { Camera, Clock, Pause, Play, RefreshCw, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { clearAll, saveInterval, saveReportInterval } from "@/lib/storage";
 import type { ReportEntry, SummaryEntry } from "@/types";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "./ui/alert-dialog";
 import { Slider } from "./ui/slider";
 
 interface Props {
@@ -33,8 +44,8 @@ export default function ControlPanel({
   streamRef,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: isSharing is needed to trigger video update when sharing starts
   useEffect(() => {
     if (isSharing && videoRef.current && streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
@@ -45,7 +56,7 @@ export default function ControlPanel({
 
   const handleIntervalChange = useCallback(
     (value: number[]) => {
-      const v = Math.max(2, Math.min(120, Math.round(value[0])));
+      const v = Math.max(1, Math.min(60, Math.round(value[0])));
       setIntervalSec(v);
       saveInterval(v);
     },
@@ -54,7 +65,7 @@ export default function ControlPanel({
 
   const handleReportIntervalChange = useCallback(
     (value: number[]) => {
-      const v = Math.max(1, Math.min(120, Math.round(value[0])));
+      const v = Math.max(1, Math.min(60, Math.round(value[0])));
       setReportIntervalMin(v);
       saveReportInterval(v);
     },
@@ -65,6 +76,7 @@ export default function ControlPanel({
     clearAll();
     setSummaries(() => []);
     setReports(() => []);
+    setIsDialogOpen(false);
     toast("ローカルデータをクリアしました");
   }, [setSummaries, setReports]);
 
@@ -93,9 +105,6 @@ export default function ControlPanel({
               <div className="rounded-full bg-muted/20 p-3">
                 <Play className="size-6 text-muted-foreground/50" />
               </div>
-              <p className="font-mono text-[10px] text-muted-foreground/70">
-                プレビューなし
-              </p>
             </div>
           )}
         </div>
@@ -134,7 +143,8 @@ export default function ControlPanel({
         {/* Capture Interval */}
         <div>
           <div className="mb-1.5 flex items-center justify-between">
-            <span className="font-mono text-[10px] text-muted-foreground">
+            <span className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
+              <Camera className="size-3" />
               キャプチャ間隔
             </span>
             <span className="font-mono text-foreground text-xs tabular-nums">
@@ -143,15 +153,15 @@ export default function ControlPanel({
           </div>
           <Slider
             className="w-full"
-            max={120}
-            min={2}
+            max={60}
+            min={1}
             onValueChange={handleIntervalChange}
             step={1}
             value={[intervalSec]}
           />
           <div className="mt-0.5 flex justify-between font-mono text-[9px] text-muted-foreground">
-            <span>2秒</span>
-            <span>120秒</span>
+            <span>1秒</span>
+            <span>60秒</span>
           </div>
         </div>
 
@@ -168,7 +178,7 @@ export default function ControlPanel({
           </div>
           <Slider
             className="w-full"
-            max={120}
+            max={60}
             min={1}
             onValueChange={handleReportIntervalChange}
             step={1}
@@ -176,20 +186,40 @@ export default function ControlPanel({
           />
           <div className="mt-0.5 flex justify-between font-mono text-[9px] text-muted-foreground">
             <span>1分</span>
-            <span>120分</span>
+            <span>60分</span>
           </div>
         </div>
       </div>
 
-      {/* Data Clear Button - Outside settings container */}
-      <button
-        className="flex w-full items-center justify-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 py-2.5 text-destructive transition-colors hover:bg-destructive/15"
-        onClick={handleClear}
-        type="button"
-      >
-        <Trash2 className="size-3.5" />
-        <span className="font-mono text-xs">データをクリア</span>
-      </button>
+      {/* Data Clear Button with Dialog */}
+      <AlertDialog onOpenChange={setIsDialogOpen} open={isDialogOpen}>
+        <AlertDialogTrigger asChild>
+          <button
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 py-2.5 text-destructive transition-colors hover:bg-destructive/15"
+            type="button"
+          >
+            <Trash2 className="size-3.5" />
+            <span className="font-mono text-xs">データをクリア</span>
+          </button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>データをクリア</AlertDialogTitle>
+            <AlertDialogDescription>
+              すべてのキャプチャサマリとレポートを削除します。この操作は取り消せません。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>キャンセル</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleClear}
+            >
+              クリア
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

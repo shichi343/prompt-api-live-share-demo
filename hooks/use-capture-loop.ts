@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { captureFrame, stopCapture } from "@/lib/capture";
-import { summarizeCaptures } from "@/lib/llm";
+import { generateCaptureSummary } from "@/lib/llm";
 import { saveSummaries } from "@/lib/storage";
 import type { SummaryEntry } from "@/types";
 
@@ -60,30 +60,22 @@ export function useCaptureLoop({
           durationMs: 0,
         };
 
-        let recent: SummaryEntry[] = [];
         setSummaries((prev) => {
-          recent = prev.slice(0, 5);
           return [pendingEntry, ...prev];
         });
 
         const startedAt = performance.now();
-        let summaryText: string | null = null;
+        let summaryText: string | undefined;
         try {
-          summaryText = await summarizeCaptures({ frameBlob, recent });
+          summaryText = await generateCaptureSummary({ frameBlob });
         } catch (err) {
           console.error("Prompt API error (summary)", err);
         }
         const durationMs = performance.now() - startedAt;
 
         if (!summaryText) {
-          const failureSummary =
-            "サマリ生成に失敗しました。Prompt APIが無効、またはマルチモーダル入力に非対応の可能性があります。";
           if (!llmUnavailableRef.current) {
             llmUnavailableRef.current = true;
-            toast.error("サマリ生成に失敗しました", {
-              description:
-                "Prompt APIが無効、またはマルチモーダル入力に非対応の可能性があります。",
-            });
           }
           if (pendingId) {
             setSummaries((prev) => {
@@ -92,7 +84,7 @@ export function useCaptureLoop({
                   ? {
                       ...item,
                       status: "error" as const,
-                      summary: failureSummary,
+                      summary: undefined,
                       durationMs,
                       errorMessage:
                         item.errorMessage ??
@@ -132,10 +124,7 @@ export function useCaptureLoop({
         if (msg.includes("InvalidStateError")) {
           await stopCapture(streamRef);
           onStopCapture();
-          toast.error("画面共有が停止されました", {
-            description:
-              "ブラウザ側で共有が終了したためキャプチャを停止しました。",
-          });
+          toast.error("画面共有が停止されました");
           return;
         }
         if (pendingId) {
